@@ -1,0 +1,499 @@
+// Laundry Management System — skema database
+// Nominal uang: Int (rupiah bulat). Berat/jumlah: Decimal(10,3).
+// Nama tabel memakai snake_case (lihat @@map); kolom memakai camelCase.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Unit {
+  KG
+  PCS
+}
+
+enum ServiceFlow {
+  WASH_DRY // Cuci Kering: cuci → kering → kemas
+  WASH_IRON // Cuci Setrika: cuci → kering → setrika → kemas
+  IRON_ONLY // Setrika Saja: setrika → kemas
+}
+
+enum OrderStatus {
+  BARU
+  MENUNGGU_PROSES
+  DICUCI
+  DIKERINGKAN
+  DISETRIKA
+  DIKEMAS
+  SIAP_DIAMBIL
+  DALAM_PENGANTARAN
+  SELESAI
+  DIBATALKAN
+}
+
+enum PaymentStatus {
+  BELUM_BAYAR
+  SEBAGIAN
+  LUNAS
+}
+
+enum Handover {
+  AMBIL_SENDIRI
+  ANTAR
+}
+
+enum DiscountType {
+  NONE
+  NOMINAL
+  PERCENT
+}
+
+enum PaymentKind {
+  PAYMENT
+  REFUND
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+  TRANSFER
+}
+
+enum TxStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum PickupStatus {
+  MENUNGGU_DIJEMPUT
+  KURIR_MENUJU_LOKASI
+  SUDAH_DIJEMPUT
+  DITERIMA_LAUNDRY
+  DIBATALKAN
+}
+
+enum DeliveryStatus {
+  MENUNGGU_DIANTAR
+  DALAM_PENGANTARAN
+  BERHASIL_DIANTAR
+  DIBATALKAN
+}
+
+enum HistoryTrack {
+  PRODUCTION
+  PAYMENT
+  PICKUP
+  DELIVERY
+}
+
+enum Membership {
+  REGULER
+  SILVER
+  GOLD
+}
+
+enum LoyaltyType {
+  EARN
+  ADJUST
+}
+
+model Role {
+  id          Int              @id @default(autoincrement())
+  key         String           @unique
+  name        String
+  permissions RolePermission[]
+  users       User[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int              @id @default(autoincrement())
+  key         String           @unique
+  description String
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  name         String
+  username     String    @unique
+  passwordHash String
+  phone        String?
+  roleId       Int
+  role         Role      @relation(fields: [roleId], references: [id])
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  courier      Courier?
+
+  @@index([roleId])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id // SHA-256 dari token acak
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userAgent String?
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model LoginAttempt {
+  id        Int      @id @default(autoincrement())
+  key       String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+  @@map("login_attempts")
+}
+
+model Courier {
+  id         Int               @id @default(autoincrement())
+  userId     Int               @unique
+  user       User              @relation(fields: [userId], references: [id])
+  phone      String?
+  vehicle    String?
+  active     Boolean           @default(true)
+  pickups    PickupRequest[]
+  deliveries DeliveryRequest[]
+
+  @@map("couriers")
+}
+
+model Customer {
+  id         Int             @id @default(autoincrement())
+  name       String
+  phone      String
+  address    String?
+  mapsUrl    String?
+  notes      String?
+  membership Membership      @default(REGULER)
+  points     Int             @default(0)
+  archivedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  orders     Order[]
+  loyalty    LoyaltyLedger[]
+  pickups    PickupRequest[]
+
+  @@index([phone])
+  @@index([name])
+  @@map("customers")
+}
+
+model Service {
+  id                   Int         @id @default(autoincrement())
+  code                 String      @unique
+  name                 String
+  unit                 Unit
+  flow                 ServiceFlow
+  price                Int
+  expressPrice         Int
+  estimateHours        Int
+  expressEstimateHours Int
+  active               Boolean     @default(true)
+  sortOrder            Int         @default(0)
+  archivedAt           DateTime?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  items                OrderItem[]
+
+  @@map("services")
+}
+
+model Order {
+  id                 Int                  @id @default(autoincrement())
+  number             String               @unique
+  refCode            String               @unique
+  idempotencyKey     String?              @unique
+  customerId         Int
+  customer           Customer             @relation(fields: [customerId], references: [id])
+  createdById        Int
+  assignedOperatorId Int?
+  status             OrderStatus          @default(BARU)
+  paymentStatus      PaymentStatus        @default(BELUM_BAYAR)
+  handover           Handover             @default(AMBIL_SENDIRI)
+  subtotal           Int
+  discountType       DiscountType         @default(NONE)
+  discountValue      Int                  @default(0)
+  discountAmount     Int                  @default(0)
+  extraFee           Int                  @default(0)
+  extraFeeNote       String?
+  pickupFee          Int                  @default(0)
+  deliveryFee        Int                  @default(0)
+  total              Int
+  paidAmount         Int                  @default(0)
+  refundedAmount     Int                  @default(0)
+  estimatedDoneAt    DateTime?
+  notes              String?
+  cancelReason       String?
+  cancelledAt        DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  items              OrderItem[]
+  payments           Payment[]
+  history            OrderStatusHistory[]
+  pickup             PickupRequest?
+  delivery           DeliveryRequest?
+  loyalty            LoyaltyLedger[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([createdAt])
+  @@index([assignedOperatorId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          Int         @id @default(autoincrement())
+  orderId     Int
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  serviceId   Int
+  service     Service     @relation(fields: [serviceId], references: [id])
+  serviceName String
+  unit        Unit
+  flow        ServiceFlow
+  express     Boolean     @default(false)
+  unitPrice   Int
+  quantity    Decimal     @db.Decimal(10, 3)
+  lineTotal   Int
+  notes       String?
+
+  @@index([orderId])
+  @@index([serviceId])
+  @@map("order_items")
+}
+
+model Payment {
+  id             Int           @id @default(autoincrement())
+  orderId        Int
+  order          Order         @relation(fields: [orderId], references: [id])
+  kind           PaymentKind   @default(PAYMENT)
+  method         PaymentMethod
+  amount         Int
+  status         TxStatus      @default(CONFIRMED)
+  idempotencyKey String?       @unique
+  qrisCode       String?       @unique // kode transaksi QRIS (terpisah dari refCode nota)
+  gatewayRef     String?       @unique
+  note           String?
+  createdById    Int?
+  confirmedById  Int?
+  createdAt      DateTime      @default(now())
+  confirmedAt    DateTime?
+
+  @@index([orderId])
+  @@index([status, confirmedAt])
+  @@map("payments")
+}
+
+model OrderStatusHistory {
+  id                Int              @id @default(autoincrement())
+  track             HistoryTrack
+  orderId           Int?
+  order             Order?           @relation(fields: [orderId], references: [id])
+  pickupRequestId   Int?
+  pickupRequest     PickupRequest?   @relation(fields: [pickupRequestId], references: [id])
+  deliveryRequestId Int?
+  deliveryRequest   DeliveryRequest? @relation(fields: [deliveryRequestId], references: [id])
+  fromStatus        String?
+  toStatus          String
+  userId            Int?
+  userName          String?
+  note              String?
+  createdAt         DateTime         @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([pickupRequestId])
+  @@index([deliveryRequestId])
+  @@index([userId, createdAt])
+  @@map("order_status_history")
+}
+
+model PickupRequest {
+  id          Int                  @id @default(autoincrement())
+  number      String               @unique
+  customerId  Int?
+  customer    Customer?            @relation(fields: [customerId], references: [id])
+  orderId     Int?                 @unique
+  order       Order?               @relation(fields: [orderId], references: [id])
+  name        String
+  phone       String
+  address     String
+  mapsUrl     String?
+  scheduledAt DateTime
+  courierId   Int?
+  courier     Courier?             @relation(fields: [courierId], references: [id])
+  fee         Int                  @default(0)
+  courierPay  Int                  @default(0)
+  notes       String?
+  status      PickupStatus         @default(MENUNGGU_DIJEMPUT)
+  createdById Int
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  photos      TaskPhoto[]
+  history     OrderStatusHistory[]
+  expenses    Expense[]
+
+  @@index([courierId, status])
+  @@index([scheduledAt])
+  @@map("pickup_requests")
+}
+
+model DeliveryRequest {
+  id          Int                  @id @default(autoincrement())
+  number      String               @unique
+  orderId     Int                  @unique
+  order       Order                @relation(fields: [orderId], references: [id])
+  name        String
+  phone       String
+  address     String
+  mapsUrl     String?
+  scheduledAt DateTime
+  courierId   Int?
+  courier     Courier?             @relation(fields: [courierId], references: [id])
+  fee         Int                  @default(0)
+  courierPay  Int                  @default(0)
+  notes       String?
+  status      DeliveryStatus       @default(MENUNGGU_DIANTAR)
+  createdById Int
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  photos      TaskPhoto[]
+  history     OrderStatusHistory[]
+  expenses    Expense[]
+
+  @@index([courierId, status])
+  @@index([scheduledAt])
+  @@map("delivery_requests")
+}
+
+model TaskPhoto {
+  id                Int              @id @default(autoincrement())
+  pickupRequestId   Int?
+  pickupRequest     PickupRequest?   @relation(fields: [pickupRequestId], references: [id])
+  deliveryRequestId Int?
+  deliveryRequest   DeliveryRequest? @relation(fields: [deliveryRequestId], references: [id])
+  mime              String
+  size              Int
+  data              Bytes
+  uploadedById      Int
+  createdAt         DateTime         @default(now())
+
+  @@index([pickupRequestId])
+  @@index([deliveryRequestId])
+  @@map("task_photos")
+}
+
+model Expense {
+  id                Int              @id @default(autoincrement())
+  date              DateTime         @db.Date
+  category          String
+  amount            Int
+  description       String?
+  pickupRequestId   Int?
+  pickupRequest     PickupRequest?   @relation(fields: [pickupRequestId], references: [id])
+  deliveryRequestId Int?
+  deliveryRequest   DeliveryRequest? @relation(fields: [deliveryRequestId], references: [id])
+  createdById       Int
+  createdAt         DateTime         @default(now())
+
+  @@index([date])
+  @@index([category])
+  @@map("expenses")
+}
+
+model LoyaltyLedger {
+  id         Int         @id @default(autoincrement())
+  customerId Int
+  customer   Customer    @relation(fields: [customerId], references: [id])
+  orderId    Int?
+  order      Order?      @relation(fields: [orderId], references: [id])
+  type       LoyaltyType
+  points     Int
+  note       String?
+  createdAt  DateTime    @default(now())
+
+  @@unique([orderId, type])
+  @@index([customerId, createdAt])
+  @@map("loyalty_ledger")
+}
+
+model BusinessSetting {
+  id                 Int      @id @default(1)
+  name               String   @default("Laundry")
+  address            String   @default("")
+  whatsapp           String   @default("")
+  logoDataUrl        String?
+  receiptFooter      String   @default("Terima kasih telah mempercayakan cucian Anda.")
+  receiptWidth       Int      @default(58)
+  printerName        String   @default("")
+  showLogoOnReceipt  Boolean  @default(true)
+  defaultPickupFee   Int      @default(5000)
+  defaultDeliveryFee Int      @default(5000)
+  pointsPerAmount    Int      @default(10000) // 1 poin per kelipatan nominal ini
+  pointsEnabled      Boolean  @default(true)
+  qrisStaticPayload  String?
+  updatedAt          DateTime @updatedAt
+
+  @@map("business_settings")
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  userName  String?
+  action    String
+  entity    String?
+  entityId  String?
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@map("activity_logs")
+}
+
+model DocSequence {
+  key  String @id // contoh: "ORD-261116"
+  last Int    @default(0)
+
+  @@map("doc_sequences")
+}
+
+model GatewayNotification {
+  id          Int      @id @default(autoincrement())
+  provider    String
+  externalId  String
+  status      String
+  payload     Json
+  processedAt DateTime @default(now())
+
+  @@unique([provider, externalId, status])
+  @@map("gateway_notifications")
+}
