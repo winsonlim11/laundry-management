@@ -24,6 +24,9 @@ vercel env add DEMO_SEED production   # isi: true (demo) / false (produksi)
 vercel --prod
 ```
 
+## Jika build gagal "Database belum terhubung" / "DATABASE_URL belum diatur"
+Proyek belum punya database. Buka **Project → Storage → Create Database → Neon** (atau *Connect Database* bila sudah ada), centang environment Production & Preview, lalu **Deployments → ⋯ → Redeploy**. Aplikasi menerima `DATABASE_URL`, `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, maupun `DATABASE_URL_UNPOOLED` (migrasi memakai URL non-pooled bila tersedia).
+
 ## Catatan
 - Migrasi aman dijalankan berulang (advisory lock + pencatatan di `_app_migrations`).
 - Untuk mengubah demo menjadi produksi: buat database baru (atau kosongkan), set `DEMO_SEED=false`, redeploy, lalu buka `/setup`.

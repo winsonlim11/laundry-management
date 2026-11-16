@@ -10,9 +10,13 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL belum diatur.");
+import { migrationDatabaseUrl } from "../src/lib/db-url";
+
+let url: string;
+try {
+  url = migrationDatabaseUrl();
+} catch (e) {
+  console.error("\n✖ " + (e as Error).message + "\n");
   process.exit(1);
 }
 const reset = process.argv.includes("--reset");

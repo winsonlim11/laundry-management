@@ -6,13 +6,14 @@
  */
 import fs from "node:fs";
 import pg from "pg";
+import { migrationDatabaseUrl } from "../src/lib/db-url";
 
 const file = process.argv[2];
 if (!file) { console.error("Pemakaian: npx tsx scripts/restore-backup.mts <file.json>"); process.exit(1); }
 const dump = JSON.parse(fs.readFileSync(file, "utf8"));
 if (dump.format !== "laundry-backup") { console.error("Bukan file backup Laundry."); process.exit(1); }
 
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+const client = new pg.Client({ connectionString: migrationDatabaseUrl() });
 await client.connect();
 const { rows } = await client.query(`SELECT count(*)::int AS n FROM "users"`);
 if (rows[0].n > 0 && !process.argv.includes("--force")) { console.error("Database tidak kosong. Gunakan database baru (atau --force jika yakin)."); process.exit(1); }
